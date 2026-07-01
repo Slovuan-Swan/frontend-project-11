@@ -2,9 +2,8 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>flow-rss</title>
+    <title>Flow RSS</title>
   </head>
   <body class="d-flex flex-column min-vh-100">
     <main class="flex-grow-1">
@@ -27,7 +26,6 @@
                       aria-label="url"
                       class="form-control w-100"
                       placeholder="Ссылка RSS"
-                      required
                       autocomplete="off"
                     />
                     <label for="url-input">Ссылка RSS</label>
@@ -48,15 +46,7 @@
           </div>
         </div>
       </section>
-
-      <section class="container-fluid container-xxl p-5">
-        <div class="row">
-          <div class="col-md-8 posts"></div>
-          <div class="col-md-4 feeds"></div>
-        </div>
-      </section>
     </main>
-
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
