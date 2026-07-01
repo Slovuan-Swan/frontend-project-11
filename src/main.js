@@ -1,11 +1,12 @@
 import { proxy } from "valtio/vanilla";
 import * as yup from "yup";
 import i18next from "i18next";
+import axios from "axios";
 import watch from "./view.js";
+import parseRss from "./parser.js";
 import "bootstrap/dist/css/bootstrap.min.css";
 import "./style.css";
 
-// 1. Конфигурация словаря i18next
 const resources = {
   ru: {
     translation: {
@@ -13,51 +14,63 @@ const resources = {
         required: "Не должно быть пустым",
         url: "Ссылка должна быть валидным URL",
         notOneOf: "RSS уже существует",
+        network: "Ошибка сети",
+        invalidRss: "Ресурс не содержит валидный RSS",
       },
       success: "RSS успешно добавлен",
+      interface: {
+        feeds: "Фиды",
+        posts: "Посты",
+      },
     },
   },
 };
 
-// 2. Связываем Yup с i18next (Yup возвращает ключи вместо текста)
 yup.setLocale({
-  string: {
-    url: "errors.url",
-  },
-  mixed: {
-    required: "errors.required",
-    notOneOf: "errors.notOneOf",
-  },
+  string: { url: "errors.url" },
+  mixed: { required: "errors.required", notOneOf: "errors.notOneOf" },
 });
 
+// Расширяем состояние для хранения списков фидов и постов
 const state = proxy({
   form: {
-    status: "filling",
-    error: null, // Здесь теперь будет храниться КЛЮЧ ошибки (строка)
+    status: "filling", // filling, loading, invalid, valid
+    error: null,
   },
   feeds: [],
+  posts: [],
 });
 
-const validateUrl = (url, feeds) => {
-  const schema = yup.string().required().url().notOneOf(feeds);
+// Массив добавленных ссылок для валидации уникальности
+const addedUrls = [];
 
+const validateUrl = (url, urls) => {
+  const schema = yup.string().required().url().notOneOf(urls);
   return schema.validate(url);
 };
 
+// Функция сборки URL для прокси allorigins с отключением кэша
+const buildProxyUrl = (url) => {
+  const proxyUrl = new URL("https://allorigins.win");
+  proxyUrl.searchParams.set("disableCache", "true");
+  proxyUrl.searchParams.set("url", url);
+  return proxyUrl.toString();
+};
+
 const app = () => {
-  // Создаем инстанс i18next
   const i18nInstance = i18next.createInstance();
 
   i18nInstance
     .init({
       lng: "ru",
-      debug: false,
       resources,
     })
     .then(() => {
       const elements = {
         form: document.querySelector(".rss-form"),
         input: document.querySelector("#url-input"),
+        feedsContainer: document.querySelector(".feeds"),
+        postsContainer: document.querySelector(".posts"),
       };
 
       let feedbackEl = document.querySelector(".feedback");
@@ -70,7 +83,6 @@ const app = () => {
         elements.feedback = feedbackEl;
       }
 
-      // Передаем инстанс i18next в вотчер
       watch(elements, state, i18nInstance);
 
       elements.form.addEventListener("submit", (e) => {
@@ -79,16 +91,43 @@ const app = () => {
         const formData = new FormData(e.target);
         const url = formData.get("url").trim();
 
-        validateUrl(url, state.feeds)
+        state.form.status = "loading";
+
+        validateUrl(url, addedUrls)
           .then((validUrl) => {
-            state.feeds.push(validUrl);
+            // Выполняем HTTP запрос через axios
+            return axios
+              .get(buildProxyUrl(validUrl))
+              .then((response) => ({ response, validUrl }));
+          })
+          .then(({ response, validUrl }) => {
+            // Парсим полученный XML контент
+            const { feed, posts } = parseRss(response.data.contents);
+
+            const feedId = crypto.randomUUID();
+
+            // Добавляем фид
+            state.feeds.push({ ...feed, id: feedId, url: validUrl });
+            addedUrls.push(validUrl);
+
+            // Добавляем посты
+            posts.forEach((post) => {
+              state.posts.push({ ...post, id: crypto.randomUUID(), feedId });
+            });
+
             state.form.error = null;
             state.form.status = "valid";
             state.form.status = "filling";
           })
           .catch((error) => {
-            // Записываем ключ ошибки (например, 'errors.url') в стейт
-            state.form.error = error.message;
+            // Дифференцируем типы возникших ошибок
+            if (error.isParserError) {
+              state.form.error = "errors.invalidRss";
+            } else if (axios.isAxiosError(error)) {
+              state.form.error = "errors.network";
+            } else {
+              state.form.error = error.message;
+            }
             state.form.status = "invalid";
           });
       });
